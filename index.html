@@ -6,117 +6,77 @@
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-    <!-- Three.js FBXLoader (uses the same Three.js version bundled in A-Frame 1.3.0 = r136) -->
+    <!-- Three.js FBXLoader -->
     <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.136.0/examples/js/loaders/FBXLoader.js"></script>
     <!-- P2P networking -->
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
     <script>
-      // ─── Custom A-Frame component: load-fbx ───────────────────────────────
-      // Usage:
-      //   load-fbx="src: path/to/model.fbx; animSrc: path/to/anim.fbx; scale: 0.01"
-      // animSrc is optional - if provided its animation clips are applied to the model.
-      AFRAME.registerComponent('load-fbx', {
-        schema: {
-          src:     { type: 'string', default: '' },
-          animSrc: { type: 'string', default: '' },
-          scale:   { type: 'number', default: 0.01 }
-        },
-        init() {
-          const loader = new THREE.FBXLoader();
-          const s = this.data.scale;
-
-          loader.load(this.data.src, (model) => {
-            model.scale.setScalar(s);
-            this.el.setObject3D('mesh', model);
-
-            // If there are animations embedded in the model itself, play them
-            if (model.animations && model.animations.length > 0 && !this.data.animSrc) {
-              const mixer = new THREE.AnimationMixer(model);
-              const action = mixer.clipAction(model.animations[0]);
-              action.play();
-              this._mixer = mixer;
-            }
-
-            // If a separate animation file is provided, load it and apply
-            if (this.data.animSrc) {
-              loader.load(this.data.animSrc, (animFbx) => {
-                const clips = animFbx.animations;
-                if (clips && clips.length > 0) {
-                  const mixer = new THREE.AnimationMixer(model);
-                  const action = mixer.clipAction(clips[0]);
-                  action.play();
-                  this._mixer = mixer;
-                }
-              });
-            }
-          }, undefined, (err) => {
-            console.error('[load-fbx] Failed to load:', this.data.src, err);
-          });
-        },
-
-        tick(t, dt) {
-          if (this._mixer) this._mixer.update(dt / 1000);
-        },
-
-        remove() {
-          this.el.removeObject3D('mesh');
-        }
-      });
 
       // ─── Custom A-Frame component: conveyor-instructions ─────────────────
-      // Shows one assembly instruction chip at a time on the belt.
-      // Starts when the marker is found, pauses when lost.
       AFRAME.registerComponent('conveyor-instructions', {
         init() {
           this.instructions = ['ADD 5, 3', 'SUB 9, 4', 'MOV 42, AX', 'CMP 12, 8'];
           this.colors       = ['#00FF88',  '#FF6B6B',  '#FFD93D',   '#C77DFF'];
-          this.CHIP_DUR = 10000;                             // ms per chip
-          this.CYCLE    = this.instructions.length * this.CHIP_DUR; // 40 000ms full loop
+          this.CHIP_DUR = 10000;
+          this.CYCLE    = this.instructions.length * this.CHIP_DUR;
           this.active   = false;
+          this.timeOffset = 0; // Tracks manual skips
 
           this.el.sceneEl.addEventListener('loaded', () => {
             this.chip      = document.getElementById('asm-chip');
             this.topText   = document.getElementById('chip-top');
             this.frontText = document.getElementById('chip-front');
 
-            const marker = document.getElementById('marker-conveyor');
-            marker.addEventListener('markerFound', () => this.start());
-            marker.addEventListener('markerLost',  () => this.stop());
+            const marker = this.el.closest('a-marker');
+            if(marker) {
+              marker.addEventListener('markerFound', () => this.start());
+              marker.addEventListener('markerLost',  () => this.stop());
+            }
 
-            // When a chip finishes its run, immediately compute & show the next
-            // (showChip uses wall-clock time, so it auto-picks the right one)
-            this.chip.addEventListener('animationcomplete', () => {
-              if (!this.active) return;
-              setTimeout(() => this.showChip(), 100);
-            });
+            if (this.chip) {
+              this.chip.addEventListener('animationcomplete', () => {
+                if (!this.active) return;
+                setTimeout(() => this.showChip(), 100);
+              });
+            }
           });
         },
 
         start() {
           if (this.active) return;
           this.active = true;
-          this.showChip();   // resume wherever the clock says we are
+          document.getElementById('fetch-btn').style.display = 'block';
+          this.showChip();
         },
 
         stop() {
           this.active = false;
+          document.getElementById('fetch-btn').style.display = 'none';
           if (this.chip) this.chip.setAttribute('visible', false);
+        },
+
+        skipToNext() {
+          if (!this.active) return;
+          
+          // Calculate time remaining in current instruction slot and skip forward
+          const cyclePos = (Date.now() + this.timeOffset) % this.CYCLE;
+          const elapsed  = cyclePos % this.CHIP_DUR;
+          const remaining = this.CHIP_DUR - elapsed;
+          
+          this.timeOffset += remaining; 
+          this.showChip(); // Restart animation with new offset
         },
 
         showChip() {
           if (!this.active || !this.chip) return;
 
-          // ── Wall-clock position ───────────────────────────────────────────
-          // All peers share the same Date.now(), so this is automatically
-          // in sync across the multiplayer session without any extra messages.
-          const cyclePos  = Date.now() % this.CYCLE;          // 0‥39 999 ms
-          const idx       = Math.floor(cyclePos / this.CHIP_DUR); // 0‥3
-          const elapsed   = cyclePos % this.CHIP_DUR;             // ms into this chip
-          const remaining = this.CHIP_DUR - elapsed;               // ms left
+          const cyclePos  = (Date.now() + this.timeOffset) % this.CYCLE;
+          const idx       = Math.floor(cyclePos / this.CHIP_DUR);
+          const elapsed   = cyclePos % this.CHIP_DUR;
+          const remaining = this.CHIP_DUR - elapsed;
 
-          // Map elapsed time to X position on the belt (-0.80 → 0.85)
           const totalDist = 1.65;
           const startX    = -0.80 + totalDist * (elapsed / this.CHIP_DUR);
 
@@ -128,12 +88,9 @@
           this.frontText.setAttribute('value', instr);
           this.frontText.setAttribute('color', color);
 
-          // Snap chip to its current mid-belt position
           this.chip.setAttribute('position', `${startX.toFixed(3)} 0.29 0`);
           this.chip.setAttribute('visible', true);
 
-          // Remove old animation so A-Frame creates a fresh component
-          // (guarantees animationcomplete fires reliably every time)
           this.chip.removeAttribute('animation');
           setTimeout(() => {
             if (!this.active) return;
@@ -152,213 +109,161 @@
 
     <style>
       #ui-overlay {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        z-index: 999;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        font-family: sans-serif;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        max-width: 220px;
+        position: fixed; top: 10px; left: 10px; z-index: 999;
+        background: rgba(0,0,0,0.7); color: white; padding: 15px; border-radius: 8px;
+        font-family: sans-serif; display: flex; flex-direction: column; gap: 10px; max-width: 220px;
       }
-      button {
-        cursor: pointer;
-        padding: 8px 12px;
-        background: #4CC3D9;
-        border: none;
-        border-radius: 4px;
-        font-weight: bold;
-      }
+      button { cursor: pointer; padding: 8px 12px; background: #4CC3D9; border: none; border-radius: 4px; font-weight: bold; }
       .status { font-size: 0.8em; color: #aaa; }
+      #fetch-btn {
+        display: none; padding: 15px 30px; background: #FFC65D; color: #1a1a2e;
+        font-size: 1.5em; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        margin-top: 20px; text-align: center; width: 100%; border: 2px solid white;
+        transition: transform 0.1s;
+      }
+      #fetch-btn:active { transform: scale(0.95); }
+      #task-panel {
+        position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+        background: rgba(26, 26, 46, 0.85); color: #00FF88; padding: 15px;
+        border-radius: 8px; font-family: monospace; font-size: 1.1em;
+        width: 250px; height: 150px; overflow-y: auto; pointer-events: auto;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #00FF88;
+      }
+      .task-item {
+        margin-bottom: 5px; border-bottom: 1px dashed rgba(0, 255, 136, 0.3); padding-bottom: 5px;
+      }
     </style>
   </head>
 
   <body style="margin: 0; overflow: hidden;">
-    <!-- UI Controls -->
     <div id="ui-overlay">
       <div id="room-info">Initializing Room...</div>
       <button id="copy-btn" style="display:none;">Copy Invite Link</button>
       <div id="peer-status" class="status">Waiting for connection...</div>
+      <button id="fetch-btn">FETCH</button>
+    </div>
+    
+    <div id="task-panel">
+      <div style="font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid white; padding-bottom: 5px; color: white;">DATA COLLECTED</div>
+      <div id="task-list"></div>
     </div>
 
-    <!-- AR Scene -->
     <a-scene
       embedded
       arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
       cursor="rayOrigin: mouse"
       raycaster="objects: .interactable">
 
-      <!-- ── Marker 1: FETCH (Hiro) – spinning torus knot ────────────────── -->
-      <a-marker type="barcode" value="2" id="marker-fetch">
-        <a-torus-knot
-          id="obj-fetch"
-          class="interactable"
-          radius="0.26"
-          radius-tubular="0.05"
-          position="0 0.5 0"
-          material="color: #4CC3D9; metalness: 0.5; roughness: 0.2"
-          animation="property: rotation; to: 0 360 0; loop: true; dur: 3000; easing: linear">
-        </a-torus-knot>
-        <a-text value="FETCH" position="0 1.2 0" align="center" color="#4CC3D9"></a-text>
-      </a-marker>
-
-      <!-- ── Marker 2: DECODE (Kanji) – Ch06 character model ─────────────── -->
-      <a-marker type="barcode" value="1" id="marker-decode">
-        <a-entity
-          id="obj-decode"
-          class="interactable"
-          load-fbx="src: model/Ch06_nonPBR (1).fbx; scale: 0.01"
-          position="0 0 0"
-          rotation="0 0 0">
-        </a-entity>
-        <a-text value="DECODE" position="0 1.5 0" align="center" color="#EF2D5E"></a-text>
-      </a-marker>
-
-      <!-- ── Marker 0: EXECUTE (Barcode 0) – Conveyor GLTF model ──────────── -->
-      <a-marker type="barcode" value="3" id="marker-execute">
-        <a-entity
-          id="obj-execute"
-          class="interactable"
-          gltf-model="model/conveyor.gltf"
-          position="0 0 0"
-          rotation="0 0 0"
-          scale="1 1 1">
-        </a-entity>
-        <a-text value="EXECUTE" position="0 1.5 0" align="center" color="#FFC65D"></a-text>
-      </a-marker>
-
-      <!-- ── Marker 3: CONVEYOR BELT (Barcode 3) – procedural primitives ──── -->
-      <a-marker type="barcode" value="0" id="marker-conveyor">
-        <a-entity id="obj-conveyor" class="interactable" position="0 0 0" conveyor-instructions>
-
-          <!-- Belt surface (scrolling dark strip) -->
-          <a-box
-            id="belt-surface"
-            width="1.6" height="0.04" depth="0.5"
-            position="0 0.22 0"
-            material="color: #222; repeat: 4 1;"
+      <!-- Marker 0: EXECUTE (Conveyor) -->
+      <a-marker type="barcode" value="0" id="marker-execute">
+        <a-entity id="obj-execute" class="interactable" position="0 0 0" conveyor-instructions>
+          <a-box id="belt-surface" width="1.6" height="0.04" depth="0.5" position="0 0.22 0" material="color: #222; repeat: 4 1;"
             animation__scroll="property: material.repeat; from: 0 0; to: 4 0; loop: true; dur: 1800; easing: linear">
           </a-box>
-
-          <!-- Frame sides (left & right long rails) -->
-          <a-box width="1.7" height="0.06" depth="0.06" position="0 0.16 0.23"
-            material="color: #888; metalness:0.6; roughness:0.3"></a-box>
-          <a-box width="1.7" height="0.06" depth="0.06" position="0 0.16 -0.23"
-            material="color: #888; metalness:0.6; roughness:0.3"></a-box>
-
-          <!-- Legs -->
-          <a-box width="0.05" height="0.3" depth="0.05" position="-0.75 0.0 0.22"
-            material="color: #666"></a-box>
-          <a-box width="0.05" height="0.3" depth="0.05" position="0.75 0.0 0.22"
-            material="color: #666"></a-box>
-          <a-box width="0.05" height="0.3" depth="0.05" position="-0.75 0.0 -0.22"
-            material="color: #666"></a-box>
-          <a-box width="0.05" height="0.3" depth="0.05" position="0.75 0.0 -0.22"
-            material="color: #666"></a-box>
-
-          <!-- Rollers (left & right end cylinders) -->
-          <a-cylinder radius="0.06" height="0.52" position="-0.8 0.22 0"
-            rotation="90 0 0"
-            material="color: #555; metalness:0.8; roughness:0.2"
-            animation="property: rotation; from: 90 0 0; to: 90 360 0; loop: true; dur: 1200; easing: linear">
-          </a-cylinder>
-          <a-cylinder radius="0.06" height="0.52" position="0.8 0.22 0"
-            rotation="90 0 0"
-            material="color: #555; metalness:0.8; roughness:0.2"
-            animation="property: rotation; from: 90 0 0; to: 90 360 0; loop: true; dur: 1200; easing: linear">
-          </a-cylinder>
-
-          <!-- ── Single managed chip – controlled by conveyor-instructions component ── -->
+          <a-box width="1.7" height="0.06" depth="0.06" position="0 0.16 0.23" material="color: #888; metalness:0.6; roughness:0.3"></a-box>
+          <a-box width="1.7" height="0.06" depth="0.06" position="0 0.16 -0.23" material="color: #888; metalness:0.6; roughness:0.3"></a-box>
+          <a-box width="0.05" height="0.3" depth="0.05" position="-0.75 0.0 0.22" material="color: #666"></a-box>
+          <a-box width="0.05" height="0.3" depth="0.05" position="0.75 0.0 0.22" material="color: #666"></a-box>
+          <a-box width="0.05" height="0.3" depth="0.05" position="-0.75 0.0 -0.22" material="color: #666"></a-box>
+          <a-box width="0.05" height="0.3" depth="0.05" position="0.75 0.0 -0.22" material="color: #666"></a-box>
           <a-entity id="asm-chip" visible="false" position="-0.80 0.29 0">
-            <a-box width="0.28" height="0.08" depth="0.18"
-              material="color: #1a1a2e; metalness:0.3; roughness:0.7"></a-box>
-            <!-- top-down label (readable from AR camera above) -->
-            <a-text id="chip-top" value="" position="0 0.05 0" rotation="-90 0 0"
-              align="center" color="#00FF88" width="1.4" wrap-count="12"></a-text>
-            <!-- front-face label (readable from the side) -->
-            <a-text id="chip-front" value="" position="0 0 0.09" rotation="0 0 0"
-              align="center" color="#00FF88" width="1.2" wrap-count="12"></a-text>
+            <a-box width="0.28" height="0.08" depth="0.18" material="color: #1a1a2e; metalness:0.3; roughness:0.7"></a-box>
+            <a-text id="chip-top" value="" position="0 0.05 0" rotation="-90 0 0" align="center" color="#00FF88" width="1.4" wrap-count="12"></a-text>
+            <a-text id="chip-front" value="" position="0 0 0.09" rotation="0 0 0" align="center" color="#00FF88" width="1.2" wrap-count="12"></a-text>
           </a-entity>
-
         </a-entity>
-        <a-text value="CONVEYOR" position="0 1.2 0" align="center" color="#F39C12"></a-text>
+        
       </a-marker>
 
       <a-entity camera></a-entity>
     </a-scene>
 
     <script>
-      // ─── P2P Networking Logic (PeerJS) ───────────────────────────────────
       const urlParams = new URLSearchParams(window.location.search);
       const roomParam = urlParams.get('room');
       const peer      = new Peer();
+      let conn = null, isHost = !roomParam;
 
-      let conn    = null;
-      let isHost  = !roomParam;
+      window.addEventListener('load', () => {
+        document.querySelectorAll('a-marker').forEach(marker => {
+          marker.addEventListener('markerFound', () => {
+            console.log(`[AR DEBUG] Marker Found: ${marker.getAttribute('value')} (${marker.id})`);
+          });
+        });
+      });
 
       peer.on('open', (id) => {
         if (isHost) {
           const roomUrl = `${window.location.origin}${window.location.pathname}?room=${id}`;
           document.getElementById('room-info').innerText = `Room ID: ${id.substring(0, 6)}`;
           document.getElementById('copy-btn').style.display = 'block';
-          document.getElementById('copy-btn').onclick = () => {
-            navigator.clipboard.writeText(roomUrl);
-            alert('Invite link copied to clipboard!');
-          };
+          document.getElementById('copy-btn').onclick = () => { navigator.clipboard.writeText(roomUrl); alert('Invite link copied!'); };
         } else {
           document.getElementById('room-info').innerText = `Joining Room...`;
           connectToPeer(roomParam);
         }
       });
 
-      peer.on('connection', (c) => {
-        conn = c;
-        setupConn();
-        document.getElementById('peer-status').innerText = 'Connected to Peer';
-      });
+      peer.on('connection', (c) => { conn = c; setupConn(); document.getElementById('peer-status').innerText = 'Connected to Peer'; });
 
       function connectToPeer(remoteId) {
         conn = peer.connect(remoteId);
-        conn.on('open', () => {
-          setupConn();
-          document.getElementById('peer-status').innerText = 'Connected to Host';
-          document.getElementById('room-info').innerText  = `In Room: ${remoteId.substring(0, 6)}`;
-        });
+        conn.on('open', () => { setupConn(); document.getElementById('peer-status').innerText = 'Connected to Host'; });
       }
 
       function setupConn() {
-        conn.on('data', (data) => {
-          if (data.type === 'interaction') {
-            const el = document.getElementById(data.id);
-            if (el) nudge(el);
+        conn.on('data', (data) => { 
+          if (data.type === 'interaction') { 
+            const el = document.getElementById(data.id); 
+            if (el) nudge(el); 
+            if (data.data) showDataCollected(data.data + " (Peer)");
+          } 
+        });
+      }
+
+      function nudge(el) { el.setAttribute('animation__nudge', { property: 'position', to: '0 0.2 0', dir: 'alternate', dur: 150, loop: 2 }); }
+
+      function showDataCollected(text) {
+        const list = document.getElementById('task-list');
+        const item = document.createElement('div');
+        item.className = 'task-item';
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        item.innerText = `[${time}] ${text}`;
+        list.appendChild(item);
+        list.parentElement.scrollTop = list.parentElement.scrollHeight;
+      }
+
+      // Handle the physical on-screen button tap for fetching
+      document.getElementById('fetch-btn').addEventListener('click', () => {
+        const chipTop = document.getElementById('chip-top');
+        if (chipTop) {
+          const instruction = chipTop.getAttribute('value') || "Instruction";
+          showDataCollected(instruction);
+          if (conn && conn.open) conn.send({ type: 'interaction', id: 'fetch-btn', data: instruction });
+          
+          // Trigger the component to skip to next instruction
+          const conveyorEl = document.getElementById('obj-execute');
+          if (conveyorEl && conveyorEl.components['conveyor-instructions']) {
+            conveyorEl.components['conveyor-instructions'].skipToNext();
           }
-        });
-        conn.on('close', () => {
-          document.getElementById('peer-status').innerText = 'Waiting for connection...';
-        });
-      }
+        }
+      });
 
-      function broadcast(data) {
-        if (conn && conn.open) conn.send(data);
-      }
-
-      function nudge(el) {
-        el.setAttribute('animation__nudge', {
-          property: 'position', to: '0 0.2 0',
-          dir: 'alternate', dur: 150, loop: 2
-        });
-      }
-
-      // ─── Interaction: click an object to nudge it (syncs to peer) ────────
       document.querySelectorAll('.interactable').forEach(el => {
-        el.addEventListener('click', () => {
-          nudge(el);
-          broadcast({ type: 'interaction', id: el.id });
+        ['mousedown', 'click'].forEach(evtType => {
+          el.addEventListener(evtType, (e) => {
+            if (e.type === 'mousedown') e.preventDefault();
+            
+            // Prevent duplicate triggers if both events fire
+            const now = Date.now();
+            if (el.lastInteraction && now - el.lastInteraction < 300) return;
+            el.lastInteraction = now;
+
+            nudge(el); 
+
+            // NOTE: Clicking the 3D model itself now acts as a secondary visual nudge,
+            // but the actual FETCH data extraction happens via the UI button above.
+          });
         });
       });
     </script>

@@ -1,0 +1,14 @@
+{
+  "name": "randy-ar-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.4"
+  }
+}
