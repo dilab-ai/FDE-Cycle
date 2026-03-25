@@ -10,13 +10,27 @@ const INSTRUCTIONS=[
 let currentInstr=null,dataA=0,dataB=0;
 const VM={}; // visible markers map
 
+function haptic(d){ if(navigator.vibrate) navigator.vibrate(d); }
+
+
 function _initMarkers(){
   ['mk-conveyor','mk-dispatch','mk-registers','mk-alu','mk-ram'].forEach(id=>{
     const m=document.getElementById(id);if(!m)return;
-    m.addEventListener('markerFound',()=>{VM[id]=true;updateButtons();});
-    m.addEventListener('markerLost',()=>{VM[id]=false;updateButtons();});
+    m.addEventListener('markerFound',()=>{VM[id]=true;updateButtons();GS.minDist=99;});
+    m.addEventListener('markerLost',()=>{VM[id]=false;updateButtons();GS.minDist=99;});
+  });
+
+  // Global tap for dropping
+  window.addEventListener('mousedown',()=>{
+    if(GS.inventory.length>0) {
+      // Check if looking at a valid drop marker
+      if(VM['mk-dispatch'] && GS.phase==='FETCHED') doDecode();
+      else if(VM['mk-alu'] && GS.phase==='LOADED') doExecute();
+      else dropItem(0);
+    }
   });
 }
+
 
 function updateButtons(){
   const s=(id,ok)=>{const e=document.getElementById(id);if(e)e.style.display=ok?'block':'none';};
@@ -26,6 +40,7 @@ function updateButtons(){
   s('btn-execute', GS.phase==='LOADED'&&VM['mk-alu']);
   s('btn-writeback',GS.phase==='EXECUTED'&&VM['mk-registers']);
   s('btn-ram',     GS.phase==='CACHE_MISS'&&VM['mk-ram']);
+
 }
 
 // Belt control
@@ -66,9 +81,9 @@ function doDecode(){
   startShake(GS.level>=5?10:15,()=>{
     const ts='open-'+currentInstr.type;
     setImg('dispatch-img',makeBlockTexture(ts));
-    GS.inventory=[{state:ts,label:currentInstr.desc}];
-    GS.currentTicket=currentInstr.type;GS.phase='DECODED';
-    log('DECODED: '+currentInstr.op+' ('+currentInstr.type+')');
+    GS.currentTicket=currentInstr.type;GS.phase='DECODING_COMPLETE';
+    log('DECODED: '+currentInstr.op+' — PULL TO COLLECT!');
+
     if(db){
       db.setAttribute('animation__rattle',{property:'rotation',from:'0 0 -4',to:'0 0 4',loop:5,dur:70,dir:'alternate'});
       setTimeout(()=>{db.setAttribute('visible','false');db.removeAttribute('animation__rattle');},450);
@@ -112,8 +127,9 @@ function doExecute(){
     const fr=document.getElementById('forge-result');
     if(fr){fr.setAttribute('visible','true');setImg('result-img',makeBlockTexture('data-result',rs));
       fr.setAttribute('animation__bob',{property:'position',from:'0 0.66 -0.16',to:'0 0.74 -0.16',dur:380,dir:'alternate',loop:999});}
-    GS.inventory=[{state:'data-result',label:rs}];GS.phase='EXECUTED';
-    log('RESULT: '+dataA+' '+currentInstr.op+' '+dataB+' = '+res);
+    GS.phase='EXECUTING_COMPLETE';
+    log('EXECUTED: Result ready — PULL TO COLLECT!');
+
     updateHUD();updateButtons();
     broadcastState('RESULT: '+dataA+' '+currentInstr.op+' '+dataB+' = '+res);
   });
@@ -251,28 +267,60 @@ _peer.on('open',id=>{
 });
 _peer.on('connection',c=>{_conn=c;_setupConn();log('Peer joined!');});
 
-function _applyState(d){
-  GS.phase        = d.phase;
-  GS.inventory    = d.inventory||[];
-  GS.clockCycles  = d.clockCycles;
-  GS.heat         = d.heat;
-  GS.maxSlots     = d.maxSlots;
-  GS.level        = d.level;
-  GS.programQueue = d.programQueue||GS.programQueue;
-  GS.currentTicket= d.currentTicket;
-  GS.result       = d.result;
-  currentInstr    = d.currentInstr;
-  // Sync register display values
-  if(d.registers){
-    Object.keys(d.registers).forEach(k=>{
-      GS.registers[k]=d.registers[k];
-      const el=document.getElementById('val-'+k);
-      if(el)el.setAttribute('value',String(d.registers[k]).padStart(3,'0'));
-    });
+function updateHUD(){
+  const dest=document.getElementById('hud-destination');
+  if(dest){
+    let msg='Go to CONVEYOR (Marker 0)';
+    if(GS.phase==='FETCHED') msg='Go to DISPATCH (Marker 1)';
+    else if(GS.phase==='DECODING') msg='Process at DISPATCH...';
+    else if(GS.phase==='DECODING_COMPLETE') msg='Collect from DISPATCH (Marker 1)';
+    else if(GS.phase==='DECODED') msg='Go to REGISTERS (Marker 2)';
+    else if(GS.phase==='LOADED') msg='Go to ALU FORGE (Marker 3)';
+    else if(GS.phase==='EXECUTING') msg='Process at FORGE...';
+    else if(GS.phase==='EXECUTING_COMPLETE') msg='Collect from FORGE (Marker 3)';
+    else if(GS.phase==='EXECUTED') msg='Go to REGISTERS (Marker 2)';
+    else if(GS.phase==='CACHE_MISS') msg='Go to RAM CABINET (Marker 4)';
+    else if(GS.phase==='FLUSH') msg='⚠ PIPELINE FLUSH ⚠';
+    dest.textContent=msg;
   }
-  updateHUD();
-  updateButtons();
+  const clock=document.getElementById('hud-clock');
+  if(clock)clock.textContent=(GS.level*10)+' Hz';
+  const q=document.getElementById('hud-queue');
+  if(q)q.textContent='▶ Cycle #'+GS.clockCycles;
+  const h=document.getElementById('hud-heat-bar');
+  if(h){h.style.width=GS.heat+'%';h.style.background=GS.heat>80?'#f00':GS.heat>50?'#f80':'#fb0';}
+  const vign=document.getElementById('heat-vignette');
+  if(vign)vign.style.opacity=(GS.heat/100)*0.5;
+  updateInventoryHUD();
 }
+
+function updateInventoryHUD(){
+  for(let i=0;i<3;i++){
+    const s=document.getElementById('slot-'+i);
+    if(!s)continue;
+    s.style.display=(i<GS.maxSlots)?'flex':'none';
+    const hasItem = !!GS.inventory[i];
+    const alreadyFilled = s.classList.contains('filled');
+    
+    if(hasItem && !alreadyFilled) haptic(40); // Haptic on pickup
+
+    s.innerHTML='';
+    if(hasItem){
+      const item=GS.inventory[i];
+      let icon='📦';
+      if(item.state==='envelope') icon='✉️';
+      else if(item.state.startsWith('open')) icon='📜';
+      else if(item.state==='data-result') icon='💎';
+      s.innerHTML=`<span>${icon}</span>`;
+      s.classList.add('filled');
+    } else {
+      s.classList.remove('filled');
+    }
+  }
+}
+
+
+
 
 function _setupConn(){
   _conn.on('open',()=>log('P2P link up ✓'));
@@ -283,7 +331,77 @@ function _setupConn(){
     }
   });
 }
+const _worldPos=new THREE.Vector3();
+function _tickGestures(){
+  // Determine active marker to watch
+  let activeId=null;
+  if(GS.phase==='IDLE') activeId='mk-conveyor';
+  else if(GS.phase==='DECODING_COMPLETE') activeId='mk-dispatch';
+  else if(GS.phase==='DECODED') activeId='mk-registers';
+  else if(GS.phase==='EXECUTING_COMPLETE') activeId='mk-alu';
+  else if(GS.phase==='EXECUTED') activeId='mk-registers';
+  else if(GS.phase==='CACHE_MISS') activeId='mk-ram';
+  else if(GS.phase==='FETCHED') activeId='mk-dispatch'; // Just for "Move Phone Back to Grab" hints or if needed
+
+
+  const hint=document.getElementById('hud-hint');
+  if(!activeId || !VM[activeId]){
+    if(hint)hint.style.display='none';
+    GS.minDist=99;return;
+  }
+
+  const m=document.getElementById(activeId);
+  m.object3D.getWorldPosition(_worldPos);
+  const dist=_worldPos.length(); // Camera is at 0,0,0
+  
+  if(!GS.minDist) GS.minDist=99;
+  GS.minDist = Math.min(GS.minDist, dist);
+
+  if(hint)hint.style.display='block';
+
+  // Debug string (distance / target distance)
+  const dStr=`Dist: ${dist.toFixed(2)}m (Min: ${GS.minDist.toFixed(2)}m)`;
+
+  // Extreme Sensitivity Logic: If pulled back by just 0.05m (5cm)
+  if(dist > GS.minDist + 0.05){
+    GS.minDist=99; // Reset
+    if(activeId==='mk-conveyor') doFetch();
+    else if(activeId==='mk-dispatch' && GS.phase==='DECODING_COMPLETE') {
+      const ts='open-'+currentInstr.type;
+      GS.inventory=[{state:ts,label:currentInstr.desc}];
+      GS.phase='DECODED'; 
+      playDrop(); log('COLLECTED decoded instruction.');
+      const db=document.getElementById('dispatch-block');
+      if(db) db.setAttribute('visible','false');
+    }
+    else if(activeId==='mk-alu' && GS.phase==='EXECUTING_COMPLETE') {
+      const rs=String(GS.result).padStart(3,'0');
+      GS.inventory=[{state:'data-result',label:rs}];
+      GS.phase='EXECUTED';
+      playDrop(); log('COLLECTED forge result.');
+      const fr=document.getElementById('forge-result');
+      if(fr){fr.removeAttribute('animation__bob');fr.setAttribute('visible','false');}
+    }
+    else if(activeId==='mk-registers') { if(GS.phase==='DECODED') doLoad(); else doWriteback(); }
+    else if(activeId==='mk-ram') doRAMFetch();
+    if(hint)hint.textContent='SUCCESS!';
+
+    haptic([40,40,40]);
+  } else {
+    if(hint)hint.textContent='PULL BACK TO GRAB | '+dStr;
+  }
+}
+
+
+AFRAME.registerComponent('interaction-tracker',{
+  tick: function(){ _tickGestures(); }
+});
+
 window.addEventListener('load',()=>{
   _initMarkers();initMotion();startBelt();updateHUD();
+  const scene=document.querySelector('a-scene');
+  if(scene) scene.setAttribute('interaction-tracker', '');
   log('Steampunk FDE Workshop ready!');
 });
+
+

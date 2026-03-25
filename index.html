@@ -36,7 +36,11 @@
       <div id="heat-wrap-bg"><div id="hud-heat-bar"></div></div>
     </div>
     <span id="hud-queue">▶ Render Frame 1</span>
+    <span id="hud-destination" style="margin-left:20px;color:#44ff88;font-weight:bold;font-size:16px;">Go to CONVEYOR (Marker 0)</span>
+    <span id="hud-hint" style="margin-left:auto;color:#ffd700;font-size:14px;font-style:italic;">Get Close to Interact</span>
   </div>
+
+
   <div id="crosshair">⊕</div>
   <div id="hud-bottom">
     <div class="inv-slot" id="slot-0" onclick="dropItem(0)" title="Slot 0"></div>
@@ -45,8 +49,9 @@
   </div>
 </div>
 
-<!-- ── ACTION BUTTONS ───────────────────────────────────────────── -->
-<div id="action-panel">
+<!-- ── ACTION BUTTONS (HIDDEN FOR GESTURES) ────────────────────── -->
+<div id="action-panel" style="display:none">
+
   <button class="action-btn" id="btn-fetch"     onclick="doFetch()">⬆ FETCH</button>
   <button class="action-btn" id="btn-decode"    onclick="doDecode()">🔧 DECODE</button>
   <button class="action-btn" id="btn-load"      onclick="doLoad()">📁 LOAD DATA</button>
@@ -79,7 +84,9 @@
   embedded
   arjs="sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
   vr-mode-ui="enabled: false"
-  renderer="logarithmicDepthBuffer: true; antialias: true; colorManagement: true; physicallyCorrectLights: true;">
+  renderer="logarithmicDepthBuffer: true; antialias: true; colorManagement: true; physicallyCorrectLights: true;"
+  interaction-tracker>
+
 
   <!-- ── LIGHTING (EXTREME VISIBILITY) ────────────────────────── -->
   <a-entity light="type: ambient; intensity: 2.2; color: #FFF"></a-entity>

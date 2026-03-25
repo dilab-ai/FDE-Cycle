@@ -12,20 +12,8 @@ const GS = {
   shakeInProgress:false
 };
 
-function updateHUD(){
-  document.getElementById('hud-clock').textContent=GS.clockCycles+' Hz';
-  const hp=Math.min(100,GS.heat);
-  const bar=document.getElementById('hud-heat-bar');
-  bar.style.width=hp+'%';
-  bar.style.background=hp>70?'#ff3300':hp>40?'#ff8800':'#44cc44';
-  document.getElementById('hud-queue').textContent='▶ '+(GS.programQueue[0]||'IDLE');
-  [0,1,2].forEach(i=>{
-    const s=document.getElementById('slot-'+i);if(!s)return;
-    s.style.display=i<GS.maxSlots?'flex':'none';
-    if(GS.inventory[i]){s.textContent='📦';s.classList.add('filled');}
-    else{s.textContent='';s.classList.remove('filled');}
-  });
-}
+// HUD updates moved to gameplay.js
+
 
 function log(msg){
   const d=document.getElementById('log-panel');if(!d)return;
