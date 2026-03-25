@@ -362,8 +362,8 @@ function _tickGestures(){
   // Debug string (distance / target distance)
   const dStr=`Dist: ${dist.toFixed(2)}m (Min: ${GS.minDist.toFixed(2)}m)`;
 
-  // Extreme Sensitivity Logic: If pulled back by just 0.05m (5cm)
-  if(dist > GS.minDist + 0.05){
+  // Increased Threshold: If pulled back by 0.15m (15cm) to prevent accidental triggers
+  if(dist > GS.minDist + 1.5){
     GS.minDist=99; // Reset
     if(activeId==='mk-conveyor') doFetch();
     else if(activeId==='mk-dispatch' && GS.phase==='DECODING_COMPLETE') {

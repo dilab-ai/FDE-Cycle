@@ -40,7 +40,7 @@ function initMotion(){
       const sc=document.querySelector('a-scene');if(!sc)return;
       if(a.y>13) sc.emit('gesture-lift');
       if(a.y<-13) sc.emit('gesture-drop');
-      if(GS.shakeInProgress){const dx=Math.abs((a.x||0)-_lastX);if(dx>7)sc.emit('gesture-shake');}
+      if(GS.shakeInProgress){const dx=Math.abs((a.x||0)-_lastX);if(dx>12)sc.emit('gesture-shake');}
       _lastX=a.x||0;
     });
   };
