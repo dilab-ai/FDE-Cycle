@@ -95,13 +95,24 @@ function setImg(id,src){const e=document.getElementById(id);if(e)e.setAttribute(
 
 // ── FETCH ────────────────────────────────────────────────────────────
 function doFetch(){
-  if(GS.phase!=='IDLE')return;
+  // Local check: Can I fetch?
+  if(GS.phase!=='IDLE' || GS.inventory.length >= GS.maxSlots) return;
+
   currentInstr=INSTRUCTIONS[Math.floor(Math.random()*INSTRUCTIONS.length)];
   GS.phase='FETCHED';GS.heat=Math.min(100,GS.heat+5);
-  GS.inventory=[{state:'envelope',label:currentInstr.desc}];
-  playDrop();log('FETCH: '+currentInstr.desc);
-  stopBelt();updateHUD();updateButtons();
-  broadcastState('FETCH: '+currentInstr.desc);
+  GS.inventory.push({state:'envelope',label:currentInstr.desc});
+  
+  playDrop(); log('FETCH: '+currentInstr.desc);
+  
+  // Visual sync: Hide chip briefly to simulate "taking" it
+  const chip=document.getElementById('belt-chip');
+  if(chip) {
+    chip.setAttribute('visible', 'false');
+    setTimeout(() => { if(GS.phase==='IDLE'||true) chip.setAttribute('visible','true'); }, 2000);
+  }
+
+  updateHUD(); updateButtons();
+  broadcastState('FETCHED an instruction', { hideChip: true });
 }
 
 // ── DECODE ───────────────────────────────────────────────────────────
@@ -173,16 +184,27 @@ function doWriteback(){
   if(GS.phase!=='EXECUTED')return;
   const rs=String(GS.result).padStart(3,'0');
   const tgt=currentInstr.op==='SUB'?'R4':'R3';
+  
+  // Shared Write
   GS.registers[tgt]=GS.result;
   const vEl=document.getElementById('val-'+tgt);if(vEl)vEl.setAttribute('value',rs);
+  
   const fr=document.getElementById('forge-result');
   if(fr){fr.removeAttribute('animation__bob');fr.setAttribute('visible','false');}
-  GS.inventory=[];GS.phase='IDLE';GS.clockCycles++;GS.heat=Math.max(0,GS.heat-10);
-  playDing();log('WRITE-BACK: '+tgt+' = '+rs+' ✓  [Cycle #'+GS.clockCycles+']');
+  
+  // Local Reset
+  GS.inventory=[]; GS.phase='IDLE'; GS.clockCycles++; GS.heat=Math.max(0,GS.heat-10);
+  
+  playDing(); log('WRITE-BACK: '+tgt+' = '+rs+' ✓  [Cycle #'+GS.clockCycles+']');
   if(GS.clockCycles%5===0)levelUp();
-  updateHUD();updateButtons();
-  broadcastState('WRITE-BACK: '+tgt+' = '+rs+' ✓  [Cycle #'+GS.clockCycles+']');
-  setTimeout(()=>{GS.programQueue.push(GS.programQueue.shift());startBelt();updateHUD();},700);
+  
+  updateHUD(); updateButtons();
+  broadcastState('Cycle #'+GS.clockCycles+' completed!');
+  
+  setTimeout(()=>{
+    GS.programQueue.push(GS.programQueue.shift());
+    updateHUD();
+  },700);
 }
 
 function dropItem(i){if(!GS.inventory[i])return;log('Dropped slot '+i+'.');}
@@ -267,23 +289,45 @@ let _conn=null;
 
 function sendPeer(d){if(_conn&&_conn.open)try{_conn.send(d);}catch(e){}}
 
-/** Broadcast the full game state so the peer stays in sync */
-function broadcastState(msg){
-  sendPeer({
+/** Broadcast the SHARED game state so the peer stays in sync */
+function broadcastState(msg, extra){
+  sendPeer(Object.assign({
     type:'state',
     msg:msg||'',
-    phase:GS.phase,
-    inventory:GS.inventory,
+    // Shared state only
     registers:Object.assign({},GS.registers),
     clockCycles:GS.clockCycles,
     heat:GS.heat,
-    maxSlots:GS.maxSlots,
     level:GS.level,
-    programQueue:GS.programQueue.slice(),
-    currentTicket:GS.currentTicket,
-    result:GS.result,
-    currentInstr:currentInstr
-  });
+    programQueue:GS.programQueue.slice()
+  }, extra));
+}
+
+/** Apply shared state from peer */
+function _applyState(d){
+  if(!d) return;
+  // Merge shared progress
+  if(d.registers) GS.registers = d.registers;
+  if(d.clockCycles !== undefined) GS.clockCycles = d.clockCycles;
+  if(d.heat !== undefined) GS.heat = d.heat;
+  if(d.level !== undefined) GS.level = d.level;
+  if(d.programQueue) GS.programQueue = d.programQueue;
+
+  // Visual event: chip hide
+  if(d.hideChip) {
+    const chip=document.getElementById('belt-chip');
+    if(chip) {
+      chip.setAttribute('visible', 'false');
+      setTimeout(() => { chip.setAttribute('visible', 'true'); }, 2000);
+    }
+  }
+
+  // Visual updates for shared state
+  updateHUD();
+  for(let r in GS.registers) {
+    const el = document.getElementById('val-'+r);
+    if(el) el.setAttribute('value', String(GS.registers[r]).padStart(3, '0'));
+  }
 }
 
 function copyLink(){
@@ -396,7 +440,7 @@ function _tickGestures(){
   const dStr=`Dist: ${dist.toFixed(2)}m (Min: ${GS.minDist.toFixed(2)}m)`;
 
   // Increased Threshold: If pulled back by 0.15m (15cm) to prevent accidental triggers
-  if(dist > GS.minDist + 1.5){
+  if(dist > GS.minDist + 0.15){
     GS.minDist=99; // Reset
     if(activeId==='mk-conveyor') doFetch();
     else if(activeId==='mk-dispatch' && GS.phase==='DECODING_COMPLETE') {
