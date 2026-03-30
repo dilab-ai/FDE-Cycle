@@ -1,3 +1,10 @@
+const SYLLABUS = {
+  1: { tasks: ['Add Int', 'Sub Int'], hazards: [], shakeMult: 1 },
+  4: { tasks: ['Load Vec2', 'Store Px', 'Cache Sync'], hazards: ['miss'], shakeMult: 1.5 },
+  7: { tasks: ['Jump Addr', 'Flush Pipe', 'Branch If'], hazards: ['miss', 'flush'], shakeMult: 1.8 },
+  10: { tasks: ['Calc Physics', 'Rasterize', 'Shader EX'], hazards: ['miss', 'flush', 'hazard'], shakeMult: 2.2 }
+};
+
 const GS = {
   phase:'IDLE',
   inventory:[],
@@ -5,23 +12,39 @@ const GS = {
   clockCycles:0,
   heat:0,
   level:1,
-  programQueue:['Render Frame 1','Calc Physics Vector','Draw Pixel Row','Execute Shader','Rasterize Tri'],
+  programQueue:[],
   registers:{R0:42,R1:17,R2:99,R3:0,R4:0},
   currentTicket:null,
   result:null,
-  shakeInProgress:false
+  aluInstruction:null, // Instruction buffered at Forge
+  shakeInProgress:false,
+  bugActive: false // Workstation lockout
 };
+
+function generateTask() {
+  const lv = Object.keys(SYLLABUS).reverse().find(k => GS.level >= k) || 1;
+  const pool = SYLLABUS[lv].tasks;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function refreshProgramQueue() {
+  GS.programQueue = [];
+  for(let i=0; i<5; i++) GS.programQueue.push(generateTask());
+}
+refreshProgramQueue();
+
 
 // HUD updates moved to gameplay.js
 
 
 function log(msg){
   const d=document.getElementById('log-panel');if(!d)return;
-  const t=new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const div=document.createElement('div');div.textContent='['+t+'] '+msg;
-  d.insertBefore(div,d.firstChild);
-  while(d.children.length>7)d.removeChild(d.lastChild);
+  const time = new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  d.innerHTML = `<div><span class="time">[${time}]</span> <span class="msg">${msg}</span></div><div class="divider"></div>`;
 }
+
+
+
 
 // Heat system
 function heatTick(){
@@ -55,7 +78,9 @@ function startShake(target,cb){
   _shakeCnt=0;_shakeTgt=target;_shakeCb=cb;GS.shakeInProgress=true;
   document.getElementById('shake-indicator').style.display='block';
   document.getElementById('shake-progress').style.width='0%';
+
   const sc=document.querySelector('a-scene');
+
   if(_shakeH)sc.removeEventListener('gesture-shake',_shakeH);
   _shakeH=()=>{
     _shakeCnt++;
