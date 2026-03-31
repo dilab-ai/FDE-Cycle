@@ -511,45 +511,96 @@ _peer.on('open',id=>{
 _peer.on('connection',c=>{_conn=c;_setupConn();log('Peer joined!');});
 
 function updateHUD(){
+  const card=document.getElementById('action-card');
   const dest=document.getElementById('hud-destination');
+  const hint=document.getElementById('hud-hint');
+  const levelBadge=document.getElementById('hud-level-badge');
+
+  if(levelBadge) levelBadge.textContent='LVL '+GS.level;
+
   if(dest){
+    // Reset card state
+    if(card){ card.className = ''; }
+
     if(GS.bugActive) {
-       dest.textContent = '⚠ SYSTEM JAMMED! TRASH BUG AT INCINERATOR (MARKER 4) ⚠';
-       dest.style.color = '#ff0000';
+       dest.textContent = '⚠ SYSTEM JAMMED! Carry bug to INCINERATOR';
+       if(hint) hint.textContent = 'Walk to Marker 4 — tap to incinerate';
+       if(card) card.classList.add('state-alert');
        document.body.classList.add('bug-active');
     } else {
        document.body.classList.remove('bug-active');
-       dest.style.color = '#44ff88';
-       let msg='Go to CONVEYOR (Marker 0)';
-       if(GS.phase==='FETCHED') msg='Go to DISPATCH (Marker 1)';
-       else if(GS.phase==='DECODING') msg='SHAKE Phone to Process...';
-       else if(GS.phase==='DECODING_COMPLETE') msg='Collect from DISPATCH (Marker 1)';
+       let msg='Walk to CONVEYOR (Marker 0)';
+       let sub='Pull phone back when close to grab instruction';
+       let cardState='';
+
+       if(GS.phase==='FETCHED') {
+         msg='Walk to DISPATCH DESK (Marker 1)';
+         sub='Then drop the envelope on the desk';
+       }
+       else if(GS.phase==='DECODING') {
+         msg='Shake phone to decode!';
+         sub='Keep shaking until the progress bar fills';
+         cardState='state-shake';
+       }
+       else if(GS.phase==='DECODING_COMPLETE') {
+         msg='Collect from DISPATCH (Marker 1)';
+         sub='Pull back while facing the desk to grab it';
+         cardState='state-collect';
+       }
        else if(GS.phase==='DECODED' || GS.phase==='LOADED') {
-          // Direct, single-path instructions per user request
-          if(GS.inventory[0].type==='blue') msg='Get Data from RAM (Marker 5)';
-          else msg='Process at FORGE (Marker 3)';
+         if(GS.inventory[0] && GS.inventory[0].type==='blue') {
+           msg='Get data from RAM CABINET (Marker 5)';
+           sub='Pull back at the cabinet to load data';
+         } else {
+           msg='Drop instruction at ALU FORGE (Marker 3)';
+           sub='Walk to Marker 3 and pull back to process';
+         }
        }
        else if(GS.phase==='AWAITING_OPERAND') {
-          // Scenario A vs B randomization in hint (stable per cycle)
-          if((GS.clockCycles + (GS.inventory[0]?GS.inventory[0].val:0)) % 2 === 0) msg='SCENARIO A: Drop at FORGE (Marker 3) first';
-          else msg='SCENARIO B: Get DATA from REGISTERS (Marker 2)';
+         msg='Get DATA from REGISTERS (Marker 2)';
+         sub='Pull back at Register Marker 2 to load operand';
        }
-       else if(GS.phase==='FORGE_WAITING_DATA') msg='Fetch DATA from REGISTERS (Marker 2)';
-       else if(GS.phase==='EXECUTING') msg='Process at FORGE...';
-       else if(GS.phase==='EXECUTING_COMPLETE') msg='Collect from FORGE (Marker 3)';
-       else if(GS.phase==='EXECUTED') msg='Go to REGISTERS (Marker 2)';
-       else if(GS.phase==='CACHE_MISS') msg='Go to RAM CABINET (Marker 5)';
-       else if(GS.phase==='FLUSH') msg='⚠ PIPELINE FLUSH ⚠';
+       else if(GS.phase==='FORGE_WAITING_DATA') {
+         msg='Fetch data from REGISTERS (Marker 2)';
+         sub='Then bring it back to the Forge';
+       }
+       else if(GS.phase==='EXECUTING') {
+         msg='Shake phone — ALU is processing!';
+         sub='Keep shaking until the forge completes';
+         cardState='state-shake';
+       }
+       else if(GS.phase==='EXECUTING_COMPLETE') {
+         msg='Collect result from FORGE (Marker 3)';
+         sub='Pull back at the forge to grab the result';
+         cardState='state-collect';
+       }
+       else if(GS.phase==='EXECUTED') {
+         msg='Write result to REGISTERS (Marker 2)';
+         sub='Pull back at Register Marker 2 to store';
+       }
+       else if(GS.phase==='CACHE_MISS') {
+         msg='Walk to RAM CABINET (Marker 5)';
+         sub='Shake hard to retrieve data from main memory';
+         cardState='state-alert';
+       }
+       else if(GS.phase==='FLUSH') {
+         msg='⚠ PIPELINE FLUSH — Wait...';
+         sub='Branch detected — resetting the pipeline';
+         cardState='state-alert';
+       }
+
        dest.textContent=msg;
+       if(hint) hint.textContent=sub;
+       if(card && cardState) card.classList.add(cardState);
     }
   }
 
   const clock=document.getElementById('hud-clock');
   if(clock)clock.textContent=(GS.level*10)+' Hz';
   const q=document.getElementById('hud-queue');
-  if(q)q.textContent='▶ PC: '+(GS.clockCycles % 100);
+  if(q)q.textContent='PC: '+(GS.clockCycles % 100);
 
-  // Level Progress Bar (e.g., progress towards next level-up every 10 cycles)
+  // Level Progress Bar
   const pb=document.getElementById('hud-level-progress');
   if(pb) {
     const progress = (GS.clockCycles % 10) * 10;
@@ -558,8 +609,8 @@ function updateHUD(){
 
   const h=document.getElementById('hud-heat-bar');
   if(h){
-    h.style.width=GS.heat+'%';h.style.background=GS.heat>80?'#f00':GS.heat>50?'#f80':'#fb0';
-    if(GS.heat > 85 && Math.random() > 0.95) document.body.classList.toggle('bug-active'); // Minor heat flicker
+    h.style.width=GS.heat+'%';h.style.background=GS.heat>80?'#f87171':GS.heat>50?'#fb923c':'#fbbf24';
+    if(GS.heat > 85 && Math.random() > 0.95) document.body.classList.toggle('bug-active');
   }
   const vign=document.getElementById('heat-vignette');
   if(vign)vign.style.opacity=(GS.heat/100)*0.5;
@@ -653,16 +704,13 @@ function _tickGestures(){
     }
   });
 
-  const hint=document.getElementById('hud-hint');
+  const hintEl=document.getElementById('hud-hint');
   if(!activeId){
-    if(hint)hint.style.display='none';
     GS.minDist=99;return;
   }
 
   if(!GS.minDist || isNaN(GS.minDist)) GS.minDist = 99;
   GS.minDist = Math.min(GS.minDist, minDist);
-
-  if(hint)hint.style.display='block';
 
   // Increased Threshold: If pulled back by 0.15m (15cm) to prevent accidental triggers
   if(minDist > GS.minDist + 0.15){
@@ -703,12 +751,7 @@ function _tickGestures(){
     else if(activeId==='mk-ram') doRAMFetch();
     else if(activeId==='mk-debugger') { playAlarm(); doDebug(); }
     
-    if(hint)hint.textContent='SUCCESS!';
-  } else {
-    if(activeId==='mk-registers') hint.textContent='PULL BACK TO LOAD | TAP TO STORE';
-    else if(activeId==='mk-ram') hint.textContent='PULL BACK TO FETCH RAM';
-    else if(activeId==='mk-alu') hint.textContent='SHAKE TO FORGE (ALU)';
-    else hint.textContent='PULL BACK TO GRAB';
+    updateHUD();
   }
 }
 
