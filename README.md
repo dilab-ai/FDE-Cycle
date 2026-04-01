@@ -5,7 +5,7 @@ Welcome to the **Steampunk Industrial Workshop**, a high-fidelity Augmented Real
 ---
 
 ## 🎬 Video Tutorial
-Watch the quick start guide here: [Randy's AR Workshop Tutorial](https://youtube.com/shorts/AQfGjmLVMMg)
+Watch the quick start guide here: [FDE Cycle AR Workshop Tutorial](https://youtube.com/shorts/AQfGjmLVMMg)
 
 [![Tutorial Preview](https://img.youtube.com/vi/AQfGjmLVMMg/0.jpg)](https://youtube.com/shorts/AQfGjmLVMMg)
 
@@ -86,7 +86,7 @@ Finally, take the Result Gem back to the **Registers**. Drop it to store the val
 ## 🛠️ Advanced Mechanics
 
 - **Heat Management**: Every action generates heat. If the heat bar (top) reaches 100%, the system may jam.
-- **System Bugs**: Occasionally, a literal "bug" (spider) will jam a workstation. You must grab it and carry it to the **Incinerator (Marker 4)** to clear the error.
+- **System Bugs**: Occasionally, a literal "bug" (spider) will jam a workstation when you make mistakes. You must grab it and carry it to the **Incinerator (Marker 4)** to clear the error. This can cause the screen to glitch out too!
 
 ![System Bug](error.png)
 - **Overclocking**: Every 5 levels, the system enters "Overclock Fever," where processing is faster but heat builds up rapidly.
